@@ -1,5 +1,7 @@
 # AniFind
 
+Quick app that claude made for me and my friends to figure out to watch
+
 Find anime that appear in multiple users' Plan to Watch lists, across MyAnimeList and AniList.
 
 ## Setup
