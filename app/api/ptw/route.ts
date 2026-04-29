@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 export interface AnimeEntry {
   id: string;
@@ -121,10 +122,53 @@ async function fetchAniListPtw(username: string): Promise<Map<string, { title: s
   return result;
 }
 
+const MAX_USERS_PER_PLATFORM = 5;
+const USERNAME_RE = /^[\w-]{1,50}$/;
+
 export async function POST(req: NextRequest) {
-  const body = await req.json();
-  const malUsers: string[] = (body.malUsers ?? []).map((u: string) => u.trim()).filter(Boolean);
-  const alUsers: string[] = (body.alUsers ?? []).map((u: string) => u.trim()).filter(Boolean);
+  const { rateLimited } = checkRateLimit(req);
+  if (rateLimited) {
+    return NextResponse.json({ error: "Too many requests. Please wait a moment." }, { status: 429 });
+  }
+
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
+  }
+
+  if (typeof body !== "object" || body === null) {
+    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+  }
+
+  const rawMal = (body as Record<string, unknown>).malUsers;
+  const rawAl = (body as Record<string, unknown>).alUsers;
+
+  if (
+    (rawMal !== undefined && !Array.isArray(rawMal)) ||
+    (rawAl !== undefined && !Array.isArray(rawAl))
+  ) {
+    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+  }
+
+  const malUsers: string[] = ((rawMal as string[] | undefined) ?? [])
+    .map((u) => (typeof u === "string" ? u.trim() : ""))
+    .filter(Boolean)
+    .slice(0, MAX_USERS_PER_PLATFORM);
+
+  const alUsers: string[] = ((rawAl as string[] | undefined) ?? [])
+    .map((u) => (typeof u === "string" ? u.trim() : ""))
+    .filter(Boolean)
+    .slice(0, MAX_USERS_PER_PLATFORM);
+
+  const invalidUsername = [...malUsers, ...alUsers].find((u) => !USERNAME_RE.test(u));
+  if (invalidUsername) {
+    return NextResponse.json(
+      { error: `Invalid username: "${invalidUsername}". Usernames must be 1–50 alphanumeric characters, underscores, or hyphens.` },
+      { status: 400 },
+    );
+  }
 
   if (malUsers.length + alUsers.length < 2) {
     return NextResponse.json({ error: "Please provide at least 2 usernames total." }, { status: 400 });
